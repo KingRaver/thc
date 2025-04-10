@@ -43,6 +43,13 @@ class PredictionConfig(TypedDict):
     range_factor: float
     accuracy_threshold: float
 
+class ProviderConfig(TypedDict):
+    """LLM provider-specific configuration"""
+    anthropic: Dict[str, str]
+    openai: Dict[str, str]
+    mistral: Dict[str, str]
+    groq: Dict[str, str]
+
 @dataclass
 class Config:
     def __init__(self) -> None:
@@ -54,9 +61,37 @@ class Config:
         load_dotenv(env_path)
         logger.logger.info("Environment variables loaded")
         
+        # Initialize LLM provider configuration
+        self.LLM_PROVIDER: str = os.getenv('LLM_PROVIDER', 'anthropic')
+        # Use client-agnostic naming for API keys and models
+        self.client_API_KEY: str = self._get_provider_api_key()
+        self.client_MODEL: str = self._get_provider_model()
+        
         # Debug loaded variables
         logger.logger.info(f"CHROME_DRIVER_PATH: {os.getenv('CHROME_DRIVER_PATH')}")
-        logger.logger.info(f"CLAUDE_API_KEY Present: {bool(os.getenv('CLAUDE_API_KEY'))}")
+        logger.logger.info(f"LLM Provider: {self.LLM_PROVIDER}")
+        logger.logger.info(f"Client API Key Present: {bool(self.client_API_KEY)}")
+        logger.logger.info(f"Client Model: {self.client_MODEL}")
+        
+        # Provider-specific configurations
+        self.PROVIDER_CONFIG: ProviderConfig = {
+            "anthropic": {
+                "api_key": os.getenv('CLAUDE_API_KEY', ''),
+                "model": os.getenv('CLAUDE_MODEL', 'claude-3-haiku-20240307')
+            },
+            "openai": {
+                "api_key": os.getenv('OPENAI_API_KEY', ''),
+                "model": os.getenv('OPENAI_MODEL', 'gpt-3.5-turbo')
+            },
+            "mistral": {
+                "api_key": os.getenv('MISTRAL_API_KEY', ''),
+                "model": os.getenv('MISTRAL_MODEL', 'mistral-medium')
+            },
+            "groq": {
+                "api_key": os.getenv('GROQ_API_KEY', ''),
+                "model": os.getenv('GROQ_MODEL', 'llama2-70b-4096')
+            }
+        }
         
         # Initialize database
         db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
@@ -77,11 +112,6 @@ class Config:
         self.GOOGLE_SHEETS_CLIENT_EMAIL: str = os.getenv('GOOGLE_SHEETS_CLIENT_EMAIL', '')
         self.GOOGLE_SHEET_ID: str = os.getenv('GOOGLE_SHEET_ID', '')
         self.GOOGLE_SHEETS_RANGE: str = 'Market Analysis!A:F'
-        
-        # Claude API Configuration
-        self.client_API_KEY: str = os.getenv('CLAUDE_API_KEY', '')
-        self.client_MODEL: str = 'claude-3-haiku-20240307'  # Updated to latest model
-        self.LLM_PROVIDER: str = os.getenv('LLM_PROVIDER', 'anthropic')
 
         # Twitter Configuration
         self.TWITTER_USERNAME: str = os.getenv('TWITTER_USERNAME', '')
@@ -190,7 +220,7 @@ class Config:
             }
         }
         
-        # Enhanced Claude Analysis Prompt Template - Token-agnostic
+        # Enhanced Client Analysis Prompt Template - Token-agnostic
         self.client_ANALYSIS_PROMPT: str = """Analyze {token} Market Dynamics:
 
 Current Market Data:
@@ -226,7 +256,7 @@ Keep the analysis technical but concise, emphasizing key shifts in market dynami
                 'technical_analysis': 0.25,
                 'statistical_models': 0.25,
                 'machine_learning': 0.25,
-                'claude_enhanced': 0.25
+                'client_enhanced': 0.25  # Changed from claude_enhanced to client_enhanced
             },
             'prediction_frequency': 60,  # Minutes between predictions for same token
             'fomo_factor': 1.2,  # Multiplier for FOMO-inducing predictions (1.0 = neutral)
@@ -234,7 +264,7 @@ Keep the analysis technical but concise, emphasizing key shifts in market dynami
             'accuracy_threshold': 60.0  # Minimum accuracy to highlight in posts
         }
 
-        # Claude Prediction Prompt Template
+        # Client Prediction Prompt Template
         self.client_PREDICTION_PROMPT: str = """Generate a precise price prediction for {token} in the next {timeframe}.
 
 Technical Analysis Summary:
@@ -270,13 +300,37 @@ Be precise but conversational. Aim for 70-80% confidence level. Create excitemen
         # Validation
         self._validate_config()
 
+    def _get_provider_api_key(self) -> str:
+        """Get the API key for the currently selected provider"""
+        if self.LLM_PROVIDER == 'anthropic':
+            return os.getenv('CLAUDE_API_KEY', '')
+        elif self.LLM_PROVIDER == 'openai':
+            return os.getenv('OPENAI_API_KEY', '')
+        elif self.LLM_PROVIDER == 'mistral':
+            return os.getenv('MISTRAL_API_KEY', '')
+        elif self.LLM_PROVIDER == 'groq':
+            return os.getenv('GROQ_API_KEY', '')
+        return ''
+
+    def _get_provider_model(self) -> str:
+        """Get the model for the currently selected provider"""
+        if self.LLM_PROVIDER == 'anthropic':
+            return os.getenv('CLAUDE_MODEL', 'claude-3-haiku-20240307')
+        elif self.LLM_PROVIDER == 'openai':
+            return os.getenv('OPENAI_MODEL', 'gpt-3.5-turbo')
+        elif self.LLM_PROVIDER == 'mistral':
+            return os.getenv('MISTRAL_MODEL', 'mistral-medium')
+        elif self.LLM_PROVIDER == 'groq':
+            return os.getenv('GROQ_MODEL', 'llama2-70b-4096')
+        return ''
+
     def _validate_config(self) -> None:
         """Validate required configuration settings"""
         required_settings: List[tuple[str, str]] = [
             ('TWITTER_USERNAME', self.TWITTER_USERNAME),
             ('TWITTER_PASSWORD', self.TWITTER_PASSWORD),
             ('CHROME_DRIVER_PATH', self.CHROME_DRIVER_PATH),
-            ('CLAUDE_API_KEY', self.client_API_KEY),
+            ('Client API Key', self.client_API_KEY),  # Updated from CLAUDE_API_KEY
             ('GOOGLE_SHEETS_PROJECT_ID', self.GOOGLE_SHEETS_PROJECT_ID),
             ('GOOGLE_SHEETS_PRIVATE_KEY', self.GOOGLE_SHEETS_PRIVATE_KEY),
             ('GOOGLE_SHEETS_CLIENT_EMAIL', self.GOOGLE_SHEETS_CLIENT_EMAIL),
@@ -302,6 +356,10 @@ Be precise but conversational. Aim for 70-80% confidence level. Create excitemen
         params = self.COINGECKO_PARAMS.copy()
         params.update(kwargs)
         return params
+
+    def get_provider_config(self) -> Dict[str, str]:
+        """Get the configuration for the currently selected LLM provider"""
+        return self.PROVIDER_CONFIG.get(self.LLM_PROVIDER, {})
 
     @property
     def twitter_selectors(self) -> Dict[str, str]:
